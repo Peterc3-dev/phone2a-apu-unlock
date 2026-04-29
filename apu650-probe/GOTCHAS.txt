@@ -1,0 +1,80 @@
+Sources used (verbatim, fetched 2026-04-29)
+-------------------------------------------
+1. mdw_ioctl.h (the ABI source of truth)
+   https://gitlab.com/mediatek/aiot/bsp/mtk-apusys-driver
+   branch: android13   path: midware/2.0/mdw_ioctl.h   HEAD: 57ccb1ae
+   API:  https://gitlab.com/api/v4/projects/35696813/repository/files/midware%2F2.0%2Fmdw_ioctl.h/raw?ref=android13
+
+2. mdw_drv.c — confirms /dev/apusys is a miscdevice with name MDW_NAME ("apusys").
+   midware/2.0/mdw_drv.c lines 117-129 (fops + miscdevice).
+
+3. mdw_hs.c, mdw_mem.c, mdw_cmd.c — read for the per-field doc-comments.
+
+4. Flora Fu MT8192 v4 series (patchwork series 593809). NOTE: the URL the user
+   supplied points to a clock/power-domain/DT-bindings series, NOT a userspace
+   ABI series. Patches 1/8 .. 8/8 are all dt-bindings, clk-mt8192, soc/mediatek
+   APU power-domain driver, arm64 dts. There are no apusys_* / mdw_* user
+   structs in this series. The only public source for the user ABI is the
+   gitlab repo above. Cross-reference attempt: failed (no overlap).
+
+Gotchas (Phone 2a / MT6886 specifically)
+----------------------------------------
+* /dev/apusys vs /dev/apu_*. The android13 branch only exposes /dev/apusys
+  (one miscdevice). MTK-internal vendor trees on production phones have
+  historically also exposed /dev/apusys_* and /dev/apu_<engine> (vpu, mdla,
+  edma) as legacy shims. If `ls /dev/apu*` on the phone shows extra nodes,
+  they are almost certainly older 1.0/1.5 midware nodes whose ABI is NOT what
+  this skeleton speaks. This probe targets the 2.0 midware only.
+
+* MT6886 vs MT8195 ABI drift — likely sources of breakage:
+  - APUSYS_MAGICNO ('A' = 0x41). Stable across all branches I looked at;
+    unlikely to drift, but check `_IOC_TYPE` from strace before trusting.
+  - ioctl numbers 32/33/34/35. These are recent (2.0 midware). Older trees
+    use 0..N. If the phone is on midware 1.5 the numbers WILL be different.
+  - struct sizes. mdw_ioctl uses _IOC_SIZE(cmd) to allocate the kernel-side
+    buffer (mdw_ioctl.c line 20), so a mismatch produces -EFAULT immediately
+    rather than silent corruption. That is a useful canary.
+  - MdwSubcmdInfo grew several fields between branches (turbo_boost,
+    min/max_boost, hse_en, pack_id, affinity). MT6886 may have a shorter
+    struct; that means handshake will work but CMD will -EFAULT.
+  - MdwSubcmdLinkV1 — the V1 suffix is a hint there are V2/V3 variants in
+    newer trees. Don't assume.
+
+* Capability discovery is the safe first move. APU_MDW_IOCTL_HANDSHAKE
+  (cmd 32) with op=BASIC returns version/dev_bitmask/mem_bitmask. If the
+  reported `version` doesn't match what mdw.h on android13 implies, stop
+  and re-derive the structs by stracing /vendor/lib*/lib*neuron* on the
+  phone before submitting any CMD ioctl.
+
+* DMA-BUF / ION dance for buffer alloc. The MEM(Alloc) ioctl returns a
+  `handle` (u64) that is a dma-buf fd internally — userspace mmap()s it
+  to get a CPU view, and passes the same handle into MdwSubcmdCmdbuf so
+  the APU sees the same physical pages. To drive this from a clean
+  userspace process you'll typically want:
+    - linux/dma-heap.h (DMA_HEAP_IOCTL_ALLOC) for cache-coherent buffers
+      from the system_uncached / mtk_mm-uncached heap.
+    - linux/dma-buf.h (DMA_BUF_IOCTL_SYNC) to flush/invalidate from CPU
+      side, mirroring MEM(Flush)/MEM(Invalidate).
+  The current uapi.rs does NOT model dma-heap; add that under src/dmaheap.rs
+  when you reach the cmdbuf-allocation TODO.
+
+* SELinux. From the stock untrusted_app / shell domain on Phone 2a,
+  /dev/apusys is unreadable: `avc: denied { open } scontext=u:r:shell:s0
+  tcontext=u:object_r:apusys_device:s0 tclass=chr_file`. This binary will
+  return EACCES from the open() call until KernelSU sepolicy is patched
+  with something like:
+    allow shell apusys_device:chr_file { read write open ioctl };
+    allow shell apusys_device:dir search;
+  and the corresponding allow lines for any /dev/dma_heap/* nodes once the
+  cmdbuf TODO is wired.
+
+* compat_ioctl. mdw_drv.c sets .compat_ioctl = mdw_ioctl, so a 32-bit
+  caller would work — but every union and struct here uses uint64_t for
+  pointer-shaped fields (handle, subcmd_infos, links, fence, ...), so the
+  ABI is identical for aarch32 and aarch64. Don't try to "fix" it.
+
+* If strace on the phone shows ioctl numbers that DON'T decode to
+  _IOWR('A', 32|33|34|35, ...), this skeleton's nix::ioctl_readwrite!
+  invocations need to be rewritten with the observed numbers and the
+  observed sizes (`_IOC_SIZE`). The skeleton is meant to be re-derived
+  per-ROM, not trusted as-is.

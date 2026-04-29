@@ -1,0 +1,45 @@
+# Rust build artifacts
+target/
+**/target/
+Cargo.lock.bak
+
+# DLA / TFLite work products (never commit; license-restricted)
+*.dla
+*.tflite
+test_input.bin
+test_output_cpu.bin
+test_output_apu.bin
+
+# Genio SDK (NEVER commit — separately licensed, non-redistributable)
+genio-sdk/
+ncc-tflite
+libneuron*.so
+neuronrt
+
+# Vendor blobs (NEVER commit — MediaTek IP)
+blobs/
+vendor/
+*.payload
+payload.bin
+
+# KSU module zip (built locally)
+apu650-unlock-ksu-*.zip
+
+# Frida captures (potentially device-identifying)
+*.jsonl
+apu_ioctl*.json
+
+# Editor / OS detritus
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+__pycache__/
+*.pyc
+
+# Local config / scratch
+.env
+.env.local
+scratch/
+notes.local.md

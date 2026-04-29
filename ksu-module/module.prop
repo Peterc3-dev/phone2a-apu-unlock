@@ -1,0 +1,6 @@
+id=apu650_unlock
+name=APU 650 Unlock
+version=v0.3
+versionCode=3
+author=phone2a-apu-unlock contributors
+description=Grants shell domain rw+ioctl access to /dev/apusys and DMA-buf heaps so apu650-probe can drive the MediaTek APU 650 NPU directly.

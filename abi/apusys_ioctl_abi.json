@@ -1,0 +1,99 @@
+{
+  "$schema_version": 1,
+  "source": "midware/2.0/mdw_ioctl.h",
+  "source_commit": "Genio android13 HEAD; byte-identical to NothingOSS android_kernel_5.15_nothing_mt6886 mt6886/Pacman/t (verified 2026-04-29)",
+  "size_method": "sizeof() via gcc on the actual header",
+  "magic": {
+    "name": "APUSYS_MAGICNO",
+    "value": 65,
+    "value_hex": "0x41",
+    "ascii": "A"
+  },
+  "ioctls": [
+    {
+      "name": "APU_MDW_IOCTL_HANDSHAKE",
+      "nr": 32,
+      "type": "A",
+      "dir": "RW",
+      "macro": "_IOWR(APUSYS_MAGICNO, 32, union mdw_hs_args)",
+      "arg_type": "union mdw_hs_args",
+      "arg_size_bytes": 40,
+      "cmd_hex": "0xc0284120",
+      "ops": [
+        { "value": 0, "name": "MDW_HS_IOCTL_OP_BASIC", "purpose": "report uapi_ver, dev/mem bitmasks, meta_size" },
+        { "value": 1, "name": "MDW_HS_IOCTL_OP_DEV",   "purpose": "per-device info: type, num, 32-byte meta" },
+        { "value": 2, "name": "MDW_HS_IOCTL_OP_MEM",   "purpose": "memory pool descriptor: type, start, size" }
+      ],
+      "first_call_canary": "MDW_HS_IOCTL_OP_BASIC — if version reply mismatches uapi.rs assumptions, stop and re-derive structs"
+    },
+    {
+      "name": "APU_MDW_IOCTL_MEM",
+      "nr": 33,
+      "type": "A",
+      "dir": "RW",
+      "macro": "_IOWR(APUSYS_MAGICNO, 33, union mdw_mem_args)",
+      "arg_type": "union mdw_mem_args",
+      "arg_size_bytes": 40,
+      "cmd_hex": "0xc0284121",
+      "ops": [
+        { "value": 0, "name": "MDW_MEM_IOCTL_ALLOC",      "purpose": "allocate dma-buf-backed buffer; returns u64 handle" },
+        { "value": 1, "name": "MDW_MEM_IOCTL_FREE",       "purpose": "release handle" },
+        { "value": 2, "name": "MDW_MEM_IOCTL_MAP",        "purpose": "map an external dma-buf fd into the apusys context" },
+        { "value": 3, "name": "MDW_MEM_IOCTL_UNMAP",      "purpose": "release a previously-mapped external buffer" },
+        { "value": 4, "name": "MDW_MEM_IOCTL_FLUSH",      "purpose": "CPU→device cache sync" },
+        { "value": 5, "name": "MDW_MEM_IOCTL_INVALIDATE", "purpose": "device→CPU cache sync" }
+      ],
+      "flags": ["F_MDW_MEM_CACHEABLE", "F_MDW_MEM_32BIT", "F_MDW_MEM_HIGHADDR"],
+      "mem_types": ["MAIN", "VLM", "LOCAL", "SYSTEM"],
+      "notes": "ALLOC returns a dma-buf fd disguised as u64 handle. To drive end-to-end you also need /dev/dma_heap/* (system_uncached / mtk_mm-uncached). userspace mmap() the handle to get a CPU view."
+    },
+    {
+      "name": "APU_MDW_IOCTL_CMD",
+      "nr": 34,
+      "type": "A",
+      "dir": "RW",
+      "macro": "_IOWR(APUSYS_MAGICNO, 34, union mdw_cmd_args)",
+      "arg_type": "union mdw_cmd_args",
+      "arg_size_bytes": 120,
+      "cmd_hex": "0xc0784122",
+      "ops": [
+        { "value": 0, "name": "MDW_CMD_IOCTL_RUN",       "purpose": "submit command graph (subcmds + links + cmdbufs) for APU execution" },
+        { "value": 1, "name": "MDW_CMD_IOCTL_RUN_STALE", "purpose": "re-submit a previously-built command without rebuilding" },
+        { "value": 2, "name": "MDW_CMD_IOCTL_DEL",       "purpose": "delete/cancel a queued or running command" }
+      ],
+      "cmdbuf_dir_enum": [
+        { "value": 0, "name": "MDW_CB_BIDIRECTIONAL", "purpose": "copy in before exec, copy out after" },
+        { "value": 1, "name": "MDW_CB_IN",            "purpose": "copy in before exec only" },
+        { "value": 2, "name": "MDW_CB_OUT",           "purpose": "copy out after exec only" }
+      ],
+      "subcmd_struct": "mdw_subcmd_info — likely shorter on MT6886 vs Genio android13. Mismatch → -EFAULT canary fires immediately on first RUN."
+    },
+    {
+      "name": "APU_MDW_IOCTL_UTIL",
+      "nr": 35,
+      "type": "A",
+      "dir": "RW",
+      "macro": "_IOWR(APUSYS_MAGICNO, 35, union mdw_util_args)",
+      "arg_type": "union mdw_util_args",
+      "arg_size_bytes": 32,
+      "cmd_hex": "0xc0204123",
+      "ops": [
+        { "value": 0, "name": "MDW_UTIL_IOCTL_SETPOWER", "purpose": "force-on a device clock domain (power hint)" },
+        { "value": 1, "name": "MDW_UTIL_IOCTL_UCMD",     "purpose": "user command: dev_type + size + handle to a user-defined opaque blob" }
+      ]
+    }
+  ],
+  "device_node": "/dev/apusys",
+  "selinux_context": "u:object_r:apusys_device:s0",
+  "open_failure_modes": {
+    "EACCES": "stock SELinux blocks shell domain; KernelSU sepolicy patch required",
+    "ENODEV": "kernel built without apusys driver (unlikely on stock Pacman)",
+    "EFAULT_on_first_cmd": "struct size mismatch; re-derive from strace before submitting CMD ioctl"
+  },
+  "verification_recipe": [
+    "rooted phone with KernelSU + sepolicy patch:  allow shell apusys_device:chr_file { read write open ioctl };",
+    "open /dev/apusys via apu650-probe binary",
+    "issue HANDSHAKE/BASIC first; capture version, dev_bitmask, mem_bitmask, meta_size",
+    "if meta_size != 32 or dev_bitmask is 0, stop and strace /vendor/bin/neuronrt to capture the actual ABI"
+  ]
+}

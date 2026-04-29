@@ -1,0 +1,21 @@
+[package]
+name = "apu650-probe"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "apu650-probe"
+path = "src/main.rs"
+
+[dependencies]
+nix = { version = "0.27", default-features = false, features = ["ioctl"] }
+libc = "0.2"
+memmap2 = "0.9"
+static_assertions = "1"
+
+[profile.release]
+opt-level = "s"
+lto = "thin"
+strip = true
+panic = "abort"
